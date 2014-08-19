@@ -148,7 +148,7 @@ def normalize_item(pairs, aligned_tiers):
     return list(tier_data.items())
 
 
-default_tokenizer = re.compile(r'\S+')
+default_tokenizer = re.compile(r'\S+\s*')
 
 def align_tiers(pairs, alignments=None, tokenizers=None):
     """
@@ -217,7 +217,7 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
             # target, but not source, of alignments; just tokenize
             if mkr not in alignments:
                 aligned_pairs.append(
-                    (mkr, [(val, [t.group(0) for t in toks])])
+                    (mkr, [(val, [t.group(0).rstrip() for t in toks])])
                 )
             # source of an alignment; tokenize and align
             else:
@@ -239,12 +239,12 @@ def _collect_aligned_tokens(src, tgt):
     src = deque(src)
     aligned = []
     for t in tgt:
-        grp = [s.group(0) for s in src
+        grp = [s.group(0).rstrip() for s in src
                if s.start() >= t.start() and s.start() < t.end()]
         # get rid of them for efficiency's sake
         for g in grp:
             src.popleft()
-        aligned.append((t.group(0), grp))
+        aligned.append((t.group(0).rstrip(), grp))
     return aligned
 
 
