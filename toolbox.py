@@ -24,7 +24,7 @@ def find_project_file(path):
     return proj_path
 
 
-toolbox_line_re = re.compile(r'(?P<mkr>\\[^\s]+)(\s|$)(?P<val>.*)$')
+toolbox_line_re = re.compile(r'(?P<mkr>\\[^\s]+)( (?P<val>.*))?$')
 
 # inspired by the NLTK's implementation:
 #   http://www.nltk.org/_modules/nltk/toolbox.html
@@ -42,7 +42,9 @@ def open_toolbox_file(f, strip=True):
         Pairs of (marker, value)
     """
     def make_val(val_lines, strip):
-        val = '\n'.join(val_lines)
+        if val_lines == [None]:
+            return None
+        val = '\n'.join([s or '' for s in val_lines])  # first s might be None
         if strip:
             val = val.rstrip()
         return val
@@ -130,20 +132,24 @@ def normalize_item(pairs, aligned_tiers):
     for mkr, val in pairs:
         if mkr not in tier_data:
             tier_data[mkr] = []
+        if val is None:
+            continue
         tier_data[mkr].append(val)
         i = len(tier_data[mkr]) - 1
         # this string length counts unicode combining characters, so
         # the lengths may appear off when printed
-        if mkr in aligned_tiers and len(val) > maxlens.get(i, 0):
+        if mkr in aligned_tiers and len(val) > maxlens.get(i, -1):
             maxlens[i] = len(val)
     # join and normalize spacing (use longest length for each position)
     mkrs = list(tier_data.keys())
     for mkr in mkrs:
-        if mkr in aligned_tiers:
-            joined = ' '.join(s.ljust(maxlens[i])
-                              for i, s in enumerate(tier_data[mkr]))
+        data = tier_data[mkr]
+        if data == []:
+            joined = None
+        elif mkr in aligned_tiers:
+            joined = ' '.join(s.ljust(maxlens[i]) for i, s in enumerate(data))
         else:
-            joined = ' '.join(tier_data[mkr])
+            joined = ' '.join(data)
         tier_data[mkr] = joined
     return list(tier_data.items())
 
@@ -177,7 +183,10 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
         unaligned lines, the target token is None and the source tokens
         has the original line as the only list item. Lines that are a
         target but not source of any alignment have their own
-        untokenized line as the target token.
+        untokenized line as the target token. If the value of a line is
+        None (e.g. there was a marker but no content), then both the
+        target_token and the source_tokens will be None, even if the
+        line should have been aligned to something.
 
     Example:
 
@@ -185,7 +194,8 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
     ...     ('\\t', 'inu=ga   ippiki           hoeru'),
     ...     ('\\m', 'inu =ga  ichi -hiki       hoe  -ru'),
     ...     ('\\g', 'dog =NOM one  -CLF.ANIMAL bark -IPFV'),
-    ...     ('\\f', 'One dog barks.')
+    ...     ('\\f', 'One dog barks.'),
+    ...     ('\\x', None)
     ... ]
     >>> align_tiers(data, alignments={'\\m': '\\t', '\\g': '\\m'})
     [('\\t', [('inu=ga ippiki hoeru', ['inu=ga', 'ippiki', 'hoeru'])]),
@@ -199,6 +209,7 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
               ('hoe', ['bark']),
               ('-ru, ['-IPFV'])]),
      ('\\f', [(None, ['One dog barks.'])])
+     ('\\x', [(None, None)])
     ]
     """
     aligned_tiers = set(alignments.keys()).union(alignments.values())
@@ -208,8 +219,11 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
     aligned_pairs = []
     for mkr, val in pairs:
         tokenizer = tokenizers.get(mkr, default_tokenizer)
+        # empty content
+        if val is None:
+            aligned_pairs.append((mkr, [(None, None)]))
         # unaligned tiers; don't do any tokenization
-        if mkr not in aligned_tiers:
+        elif mkr not in aligned_tiers:
             aligned_pairs.append((mkr, [(None, [val])]))
         else:
             toks = list(tokenizer.finditer(val))
