@@ -28,7 +28,7 @@ toolbox_line_re = re.compile(r'(?P<mkr>\\[^\s]+)( (?P<val>.*))?$')
 
 # inspired by the NLTK's implementation:
 #   http://www.nltk.org/_modules/nltk/toolbox.html
-def open_toolbox_file(f, strip=True):
+def read_toolbox_file(f, strip=True):
     """
     Parse a Toolbox file and yield pairs of (marker, value). By default,
     no interpretation or normalization of the data is done besides
@@ -97,9 +97,10 @@ def item_iter(pairs, keys=None):
 def normalize_item(pairs, aligned_tiers):
     """
     Return a list of pairs of (marker, value) from `pairs`, where values
-    with the same marker are recombined (i.e. unwrapped) if the marker
-    is in `aligned_tiers`. Values at each position are first normalized
-    for spacing by the length of the longest aligned value.
+    with the same marker are recombined (i.e. unwrapped). If the marker
+    is in `aligned_tiers`, spacing will also be normalized (taking the
+    length of the longest token) so that the tokens still align visually
+    in columns.
 
     Args:
         pairs: An iterable of (marker, value) pairs.
@@ -110,15 +111,15 @@ def normalize_item(pairs, aligned_tiers):
     Example:
 
     >>> data = [
-    ...     ('\\t', 'inu=ga   ippiki')
-    ...     ('\\m', 'inu =ga  ichi -hiki')
-    ...     ('\\g', 'dog =NOM one  -CLF.ANIMAL')
-    ...     ('\\t', 'hoeru')
-    ...     ('\\m', 'hoe  -ru')
-    ...     ('\\g', 'bark -IPFV')
+    ...     ('\\t', 'inu=ga   ippiki'),
+    ...     ('\\m', 'inu =ga  ichi -hiki'),
+    ...     ('\\g', 'dog =NOM one  -CLF.ANIMAL'),
+    ...     ('\\t', 'hoeru'),
+    ...     ('\\m', 'hoe  -ru'),
+    ...     ('\\g', 'bark -IPFV'),
     ...     ('\\f', 'One dog barks.')
     ... ]
-    >>> for (mkr, val) in normalize_item(data, set(['\\g', '\\m'])):
+    >>> for (mkr, val) in normalize_item(data, set(['\\t', \\g', '\\m'])):
     ...     print(mkr, val)
     \t inu=ga   ippiki           hoeru
     \m inu =ga  ichi -hiki       hoe  -ru
