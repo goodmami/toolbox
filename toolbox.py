@@ -24,7 +24,7 @@ def find_project_file(path):
     return proj_path
 
 
-toolbox_line_re = re.compile(r'(?P<mkr>\\[^\s]+)( (?P<val>.*))?$')
+toolbox_line_re = re.compile(r'(?P<mkr>\\[^\s]+)( (?P<val>.*\n?))?$')
 
 # inspired by the NLTK's implementation:
 #   http://www.nltk.org/_modules/nltk/toolbox.html
@@ -44,7 +44,7 @@ def read_toolbox_file(f, strip=True):
     def make_val(val_lines, strip):
         if val_lines == [None]:
             return None
-        val = '\n'.join([s or '' for s in val_lines])  # first s might be None
+        val = ''.join([s or '' for s in val_lines])  # first s might be None
         if strip:
             val = val.rstrip()
         return val
