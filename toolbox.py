@@ -5,8 +5,8 @@ import re
 from collections import OrderedDict, deque
 import logging
 
-class ToolboxException(Exception): ...
-class ToolboxInitError(ToolboxException): ...
+class ToolboxException(Exception): pass
+class ToolboxInitError(ToolboxException): pass
 
 def find_project_file(path):
     proj_path = None
