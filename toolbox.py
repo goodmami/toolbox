@@ -83,12 +83,14 @@ def record_iter(pairs, keys):
         Pairs of (event, result).
     """
     data = []
+    mkr_seen = False
     for mkr, val in pairs:
         if mkr in (keys):
             if len(data) > 0:
-                yield ('record', data)
+                yield ('record' if mkr_seen else 'header', data)
                 data = []
             yield ('key', (mkr, val))
+            mkr_seen = True
         else:
             data.append((mkr, val))
     # don't forget to yield the last one
@@ -153,7 +155,7 @@ def normalize_record(pairs, aligned_fields, strip=True):
             joined = ' '.join(s.ljust(maxlens[i]) for i, s in enumerate(data))
         else:
             joined = ' '.join(data)
-        if strip:
+        if strip and joined is not None:
             joined = joined.rstrip()
         field_data[mkr] = joined
     return list(field_data.items())
