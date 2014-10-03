@@ -5,6 +5,8 @@ import re
 from collections import OrderedDict, deque
 import logging
 
+default_tokenizer = re.compile(r'\S+\s*')
+
 class ToolboxException(Exception): pass
 class ToolboxInitError(ToolboxException): pass
 
@@ -65,18 +67,18 @@ def read_toolbox_file(f, strip=True):
         yield (mkr, make_val(val_lines, strip))
 
 
-def item_iter(pairs, keys=None):
+def record_iter(pairs, keys):
     """
     Yield pairs of (event, result) based on `keys` for the given
-    `pairs`. Events are either `key` or `item`. If the event is `key`,
+    `pairs`. Events are either `key` or `record`. If the event is `key`,
     the result is a pair of (marker, value) where the marker is the key
-    that was matched. If the event is `item`, the result is a list of
+    that was matched. If the event is `record`, the result is a list of
     all pairs of (marker, value) that occur between one key and the
     next.
 
     Args:
         pairs: An iterable of (marker, value) pairs.
-        keys: A container of markers that delimit items.
+        keys: A container of markers that delimit records.
     Yields:
         Pairs of (event, result).
     """
@@ -84,29 +86,29 @@ def item_iter(pairs, keys=None):
     for mkr, val in pairs:
         if mkr in (keys):
             if len(data) > 0:
-                yield ('item', data)
+                yield ('record', data)
                 data = []
             yield ('key', (mkr, val))
         else:
             data.append((mkr, val))
     # don't forget to yield the last one
     if len(data) > 0:
-        yield ('item', data)
+        yield ('record', data)
 
 
-def normalize_item(pairs, aligned_tiers):
+def normalize_record(pairs, aligned_fields, strip=True):
     """
     Return a list of pairs of (marker, value) from `pairs`, where values
     with the same marker are recombined (i.e. unwrapped). If the marker
-    is in `aligned_tiers`, spacing will also be normalized (taking the
+    is in `aligned_fields`, spacing will also be normalized (taking the
     length of the longest token) so that the tokens still align visually
     in columns.
 
     Args:
         pairs: An iterable of (marker, value) pairs.
-        aligned_tiers: A container of markers that are aligned.
+        aligned_fields: A container of markers that are aligned.
     Return:
-        The list of pairs with aligned tiers normalized.
+        The list of pairs with aligned fields normalized.
 
     Example:
 
@@ -119,45 +121,45 @@ def normalize_item(pairs, aligned_tiers):
     ...     ('\\g', 'bark -IPFV'),
     ...     ('\\f', 'One dog barks.')
     ... ]
-    >>> for (mkr, val) in normalize_item(data, set(['\\t', \\g', '\\m'])):
+    >>> for (mkr, val) in normalize_record(data, set(['\\t', \\g', '\\m'])):
     ...     print(mkr, val)
     \t inu=ga   ippiki           hoeru
     \m inu =ga  ichi -hiki       hoe  -ru
     \g dog =NOM one  -CLF.ANIMAL bark -IPFV
     \f One dog barks.
     """
-    tier_data = OrderedDict()
+    field_data = OrderedDict()
     # gather lines with the same marker, and keep track of the longest
-    # aligned tiers at each position
+    # aligned fields at each position
     maxlens = {}
     for mkr, val in pairs:
-        if mkr not in tier_data:
-            tier_data[mkr] = []
+        if mkr not in field_data:
+            field_data[mkr] = []
         if val is None:
             continue
-        tier_data[mkr].append(val)
-        i = len(tier_data[mkr]) - 1
+        field_data[mkr].append(val)
+        i = len(field_data[mkr]) - 1
         # this string length counts unicode combining characters, so
         # the lengths may appear off when printed
-        if mkr in aligned_tiers and len(val) > maxlens.get(i, -1):
+        if mkr in aligned_fields and len(val) > maxlens.get(i, -1):
             maxlens[i] = len(val)
     # join and normalize spacing (use longest length for each position)
-    mkrs = list(tier_data.keys())
+    mkrs = list(field_data.keys())
     for mkr in mkrs:
-        data = tier_data[mkr]
+        data = field_data[mkr]
         if data == []:
             joined = None
-        elif mkr in aligned_tiers:
+        elif mkr in aligned_fields:
             joined = ' '.join(s.ljust(maxlens[i]) for i, s in enumerate(data))
         else:
             joined = ' '.join(data)
-        tier_data[mkr] = joined
-    return list(tier_data.items())
+        if strip:
+            joined = joined.rstrip()
+        field_data[mkr] = joined
+    return list(field_data.items())
 
 
-default_tokenizer = re.compile(r'\S+\s*')
-
-def align_tiers(pairs, alignments=None, tokenizers=None):
+def align_fields(pairs, alignments=None, tokenizers=None):
     """
     Align source to target tokens for each line in `pairs` using
     alignment mappings given in `alignments`. Line values are tokenized
@@ -172,7 +174,7 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
             alignment target of None.
         tokenizers: A dictionary of {marker: regex}, where the compiled
             regular expression `regex` is used to find sub-parts of the
-            original value of the tier. If `tokenizers` is None or a
+            original value of the field. If `tokenizers` is None or a
             tokenizer regex is not given for a marker, and the marker is
             the source or target of an alignment, the values will be
             split by whitespace.
@@ -198,7 +200,7 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
     ...     ('\\f', 'One dog barks.'),
     ...     ('\\x', None)
     ... ]
-    >>> align_tiers(data, alignments={'\\m': '\\t', '\\g': '\\m'})
+    >>> align_fields(data, alignments={'\\m': '\\t', '\\g': '\\m'})
     [('\\t', [('inu=ga ippiki hoeru', ['inu=ga', 'ippiki', 'hoeru'])]),
      ('\\m', [('inu=ga', ['inu', '=ga']),
               ('ippiki', ['ichi', '-hiki']),
@@ -213,7 +215,7 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
      ('\\x', [(None, None)])
     ]
     """
-    aligned_tiers = set(alignments.keys()).union(alignments.values())
+    aligned_fields = set(alignments.keys()).union(alignments.values())
     alignments = dict(alignments or [])
     tokenizers = dict(tokenizers or [])
     prev = {}  # previous tokenization matches used for alignment
@@ -223,8 +225,8 @@ def align_tiers(pairs, alignments=None, tokenizers=None):
         # empty content
         if val is None:
             aligned_pairs.append((mkr, [(None, None)]))
-        # unaligned tiers; don't do any tokenization
-        elif mkr not in aligned_tiers:
+        # unaligned fields; don't do any tokenization
+        elif mkr not in aligned_fields:
             aligned_pairs.append((mkr, [(None, [val])]))
         else:
             toks = list(tokenizer.finditer(val))
