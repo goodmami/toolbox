@@ -253,3 +253,222 @@ be ignored:
 ('\\mkr3', 'yet another')
 
 ```
+
+Line Grouping with `iterparse()`
+--------------------------------
+
+Groups of (marker, value) pairs often come in blocks of related data.
+The `toolbox.iterparse()` function helps in processing this kind of
+data. Given some keys, it will report events with the associated data.
+The 'key', 'start', and 'end' events simply give the (marker, value)
+pairs as the result if '\key', '\+key', or '\-key', respectively, were
+seen. The result of the 'data' event is the list of (marker, value)
+pairs that occur between keys.
+
+```python
+>>> pairs = rtf('''
+... \\ref 1
+... \\a val
+... \\b val
+... \\ref 2
+... \\a val2''')
+>>> records = tb.iterparse(pairs, keys=['\\ref'])
+>>> for event, result in records:
+...     print((event, result))
+('key', ('\\ref', '1'))
+('data', [('\\a', 'val'), ('\\b', 'val')])
+('key', ('\\ref', '2'))
+('data', [('\\a', 'val2')])
+
+```
+
+The 'start' and 'end' events are treated as normal keys (no special
+grouping of data between related start and end events is performed),
+but the user only needs to specify the key without the `+` or `-`:
+
+```python
+>>> pairs = rtf('''
+... \\+block
+... \\a val
+... \\+subblock
+... \\b val
+... \\-subblock
+... \\c val
+... \\-block''')
+>>> events = tb.iterparse(pairs, keys=['\\block', '\\subblock'])
+>>> for event, result in events:
+...     print((event, result))
+('start', ('\\block', None))
+('data', [('\\a', 'val')])
+('start', ('\\subblock', None))
+('data', [('\\b', 'val')])
+('end', ('\\subblock', None))
+('data', [('\\c', 'val')])
+('end', ('\\block', None))
+
+```
+
+
+Record Grouping with `records()`
+--------------------------------
+
+```python
+>>> pairs = rtf('''
+... \\header info
+... \\ref 1
+... \\t some words
+... \\m some word -s
+... \\ref 2
+... \\t more words
+... \\m more word -s''')
+>>> recs = tb.records(pairs, '\\ref')
+>>> for ctxt, data in recs:
+...    print((sorted(ctxt.items()), data))
+([('\\ref', None)], [('\\header', 'info')])
+([('\\ref', '1')], [('\\t', 'some words'), ('\\m', 'some word -s')])
+([('\\ref', '2')], [('\\t', 'more words'), ('\\m', 'more word -s')])
+
+```
+
+```python
+>>> pairs = rtf('''
+... \\ref 1
+... \\t text
+... \\id i1
+... \\header info
+... \\ref 2
+... \\t text again
+... \\ref 3
+... \\t and again''')
+>>> recs = tb.records(pairs, ['\\id', '\\ref'])
+>>> for ctxt, data in recs:
+...     print((sorted(ctxt.items()), data))
+([('\\id', None), ('\\ref', '1')], [('\\t', 'text')])
+([('\\id', 'i1'), ('\\ref', None)], [('\\header', 'info')])
+([('\\id', 'i1'), ('\\ref', '2')], [('\\t', 'text again')])
+([('\\id', 'i1'), ('\\ref', '3')], [('\\t', 'and again')])
+
+```
+
+```python
+>>> pairs = rtf('''
+... \\ref 1
+... \\t text
+... \\id i1
+... \\header info
+... \\ref 2
+... \\t text again
+... \\page 5
+... \\ref 3
+... \\t and again''')
+>>> recs = tb.records(pairs, ['\\id', '\\ref'], context_keys=['\\page'])
+>>> for ctxt, data in recs:
+...     print((sorted(ctxt.items()), data))
+([('\\id', None), ('\\page', None), ('\\ref', '1')], [('\\t', 'text')])
+([('\\id', 'i1'), ('\\page', None), ('\\ref', None)], [('\\header', 'info')])
+([('\\id', 'i1'), ('\\page', None), ('\\ref', '2')], [('\\t', 'text again')])
+([('\\id', 'i1'), ('\\page', '5'), ('\\ref', '3')], [('\\t', 'and again')])
+
+```
+
+
+Field Grouping with `field_groups()`
+------------------------------------
+
+```python
+>>> pairs = rtf('''
+... \\j 犬が吠える
+... \\t inu=ga   hoeru
+... \\m inu =ga  hoe  -ru
+... \\g dog =NOM bark -IPFV
+... \\f A dog barks.
+... ''')
+>>> for pair_list in tb.field_groups(pairs, set(['\\t', '\\m', '\\g'])):
+...     print(pair_list)  # doctest: +NORMALIZE_WHITESPACE
+[('\\j', '犬が吠える')]
+[('\\t', 'inu=ga   hoeru'),
+ ('\\m', 'inu =ga  hoe  -ru'),
+ ('\\g', 'dog =NOM bark -IPFV')]
+[('\\f', 'A dog barks.')]
+
+```
+
+Unwrapping and Respacing with `normalize_record()`
+------------------------------------------------
+
+Aligned fields that Toolbox has wrapped can be reconstructed into single
+lines that keep the column spacing intact. Unaligned fields will be wrapped
+without considering spaced columns.
+
+```python
+>>> pairs = rtf('''
+... \\ref s1
+... \\t waadorappu sareta
+... \\m waadorappu sare-ta
+... \\g word.wrap  PASS-PFV
+... \\t tekisuto
+... \\m tekisuto
+... \\g text
+... \\f word-wrapped text
+... ''')
+>>> normrecs = tb.normalize_record(pairs, set(['\\t', '\\m', '\\g']))
+>>> for mkr, val in normrecs:
+...     print((mkr, val))
+('\\ref', 's1')
+('\\t', 'waadorappu sareta   tekisuto')
+('\\m', 'waadorappu sare-ta  tekisuto')
+('\\g', 'word.wrap  PASS-PFV text')
+('\\f', 'word-wrapped text')
+
+```
+
+By default, trailing spaces are stripped from each line, but (as in
+`toolbox.read_toolbox_file()`), this behavior can be turned off by setting
+`strip=False`:
+
+```python
+>>> pairs = rtf('''
+... \\a abc
+... \\b s
+... \\a def
+... \\b tuvwxyz
+... ''')
+>>> for mkr, val in tb.normalize_record(pairs, ['\\a', '\\b']):
+...     print((mkr, val))
+('\\a', 'abc def')
+('\\b', 's   tuvwxyz')
+>>> for mkr, val in tb.normalize_record(pairs, ['\\a', '\\b'], strip=False):
+...     print((mkr, val))
+('\\a', 'abc def    ')
+('\\b', 's   tuvwxyz')
+
+```
+
+
+Aligning Interlinear Columns with `align_fields()`
+--------------------------------------------------
+
+```python
+>>> pairs = rtf('''
+... \\t inu=ga   ippiki           hoeru
+... \\m inu =ga  ichi -hiki       hoe  -ru
+... \\g dog =NOM one  -CLF.ANIMAL bark -IPFV
+... \\f One dog barks.
+... \\x''')
+>>> algns = tb.align_fields(pairs, alignments={'\\m': '\\t', '\\g': '\\m'})
+>>> for algn in algns:
+...     print(algn)  # doctest: +NORMALIZE_WHITESPACE
+('\\t', [('inu=ga   ippiki           hoeru', ['inu=ga', 'ippiki', 'hoeru'])])
+('\\m', [('inu=ga', ['inu', '=ga']),
+         ('ippiki', ['ichi', '-hiki']),
+         ('hoeru', ['hoe', '-ru'])])
+('\\g', [('inu', ['dog']),
+         ('=ga', ['=NOM']),
+         ('ichi', ['one']),
+         ('-hiki', ['-CLF.ANIMAL']),
+         ('hoe', ['bark']),
+         ('-ru', ['-IPFV'])])
+('\\f', [(None, ['One dog barks.'])])
+('\\x', [(None, None)])
+
+```

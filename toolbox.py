@@ -2,13 +2,13 @@
 import os.path
 from os import listdir
 import re
-from collections import OrderedDict, deque
+from collections import OrderedDict, deque, Sequence
 import logging
 
 default_tokenizer = re.compile(r'\S+\s*')
 
-class ToolboxException(Exception): pass
-class ToolboxInitError(ToolboxException): pass
+class ToolboxError(Exception): pass
+class ToolboxInitError(ToolboxError): pass
 
 def find_project_file(path):
     proj_path = None
@@ -67,35 +67,128 @@ def read_toolbox_file(f, strip=True):
         yield (mkr, make_val(val_lines, strip))
 
 
-def record_iter(pairs, keys):
+def iterparse(pairs, keys):
     """
     Yield pairs of (event, result) based on `keys` for the given
-    `pairs`. Events are either `key` or `record`. If the event is `key`,
-    the result is a pair of (marker, value) where the marker is the key
-    that was matched. If the event is `record`, the result is a list of
-    all pairs of (marker, value) that occur between one key and the
-    next.
+    `pairs`. Events and associated results are given below:
+
+    =====  =============================================
+    event                     result
+    =====  =============================================
+    key    the (key, value) pair for when \key was seen
+    start  the (key, value) pair for when \+key was seen
+    end    the (key, value) pair for when \-key was seen
+    data   list of (marker, value) pairs between keys
+    =====  =============================================
 
     Args:
         pairs: An iterable of (marker, value) pairs.
-        keys: A container of markers that delimit records.
+        keys: A container of markers that delimit blocks of associated
+              data.
     Yields:
         Pairs of (event, result).
     """
+    start_keys = set(re.sub(r'\\(.*)', r'\+\1', k) for k in keys)
+    end_keys = set(re.sub(r'\\(.*)', r'\-\1', k) for k in keys)
+    all_keys = set(keys).union(start_keys, end_keys)
     data = []
-    mkr_seen = False
     for mkr, val in pairs:
-        if mkr in (keys):
+        if mkr in all_keys:
             if len(data) > 0:
-                yield ('record' if mkr_seen else 'header', data)
+                yield ('data', data)
                 data = []
-            yield ('key', (mkr, val))
-            mkr_seen = True
+            if mkr in keys:
+                yield ('key', (mkr, val))
+            elif mkr in start_keys:
+                yield ('start', ('\\{}'.format(mkr[2:]), val))
+            elif mkr in end_keys:
+                yield ('end', ('\\{}'.format(mkr[2:]), val))
         else:
             data.append((mkr, val))
     # don't forget to yield the last one
     if len(data) > 0:
-        yield ('record', data)
+        yield ('data', data)
+
+
+def records(pairs, record_marker, context_keys=None):
+    """
+    An alternative parsing function to iterparse(), which yields pairs
+    of (context, data), where context is a dictionary mapping each key
+    to the previously seen value, and data is the list of
+    (marker, value) pairs delimited by the keys. The basic usage is:
+
+        records(pairs, '\\ref')
+
+    Where `'\\ref'` is the delimiter of records in `pairs`.
+
+    Args:
+        pairs: An iterable of (marker, value) pairs.
+        record_marker: The marker(s) that delimits records. If the
+            value is a string, it is considered the only record
+            marker. Any other Sequence (list, tuple, etc.) become an
+            ordered hierarchy of record delimiters. When a higher
+            marker is encountered, it resets the value of the lower
+            markers to None. For instance, if ['\\id', '\\ref'] is
+            used, '\\ref' is reset to None whenever '\\id' is
+            encountered.
+        context_keys: A container of additional delimiters to include
+            in the context, but unlike `record_marker`, these do not
+            reset other markers. E.g. one might use \\page to group
+            elements in a section that spans several pages.
+    Yields:
+        Pairs of (context, data)
+    Raises:
+        ToolboxError when block-start markers (\\+key) or block-end
+        markers (\\-key) are seen, as they are considered invalid
+        within records.
+    """
+    if isinstance(record_marker, str):
+        record_marker = [record_marker]
+    if not isinstance(record_marker, Sequence):
+        raise ToolboxError('Record marker must be a string or a sequence.')
+    keys = set(record_marker).union(context_keys or [])
+    context = dict((key, None) for key in keys)
+    for event, result in iterparse(pairs, keys):
+        if event == 'key':
+            mkr, val = result
+            try:
+                idx = record_marker.index(mkr)
+                for m in record_marker[idx:]:
+                    context[m] = None
+            except ValueError:
+                pass
+            context[mkr] = val
+        elif event == 'data':
+            yield (context, result)
+        else:
+            raise ToolboxError('Illegal event in record: {}'
+                               .format(event, result))
+
+
+def field_groups(pairs, aligned_fields):
+    """
+    Yield lists of (marker, value) pairs where all pairs in the list
+    are aligned. Unaligned fields will be returned as the only pair in
+    the list, and repeating groups (e.g. where they are wrapped) will
+    be returned separately.
+    """
+    group = []
+    seen = set()
+    for mkr, val in pairs:
+        # unaligned or repeated fields start over grouping
+        if mkr not in aligned_fields or mkr in seen:
+            if group:
+                yield group
+            group = []
+            seen = set()
+            if mkr not in aligned_fields:
+                yield [(mkr, val)]
+                continue
+        group.append((mkr, val))
+        seen.add(mkr)
+    # yield the last group if non-empty
+    if group:
+        yield group
 
 
 def normalize_record(pairs, aligned_fields, strip=True):
@@ -196,14 +289,15 @@ def align_fields(pairs, alignments=None, tokenizers=None):
     Example:
 
     >>> data = [
-    ...     ('\\t', 'inu=ga   ippiki           hoeru'),
-    ...     ('\\m', 'inu =ga  ichi -hiki       hoe  -ru'),
+    ...     ('\\t', 'inu=ga   ippiki           hoeru     '),
+    ...     ('\\m', 'inu =ga  ichi -hiki       hoe  -ru  '),
     ...     ('\\g', 'dog =NOM one  -CLF.ANIMAL bark -IPFV'),
     ...     ('\\f', 'One dog barks.'),
     ...     ('\\x', None)
     ... ]
     >>> align_fields(data, alignments={'\\m': '\\t', '\\g': '\\m'})
-    [('\\t', [('inu=ga ippiki hoeru', ['inu=ga', 'ippiki', 'hoeru'])]),
+    [('\\t', [('inu=ga   ippiki           hoeru     ',
+               ['inu=ga', 'ippiki', 'hoeru'])]),
      ('\\m', [('inu=ga', ['inu', '=ga']),
               ('ippiki', ['ichi', '-hiki']),
               ('hoeru', ['hoe', '-ru'])]),
@@ -212,8 +306,8 @@ def align_fields(pairs, alignments=None, tokenizers=None):
               ('ichi', ['one']),
               ('-hiki' ['-CLF.ANIMAL']),
               ('hoe', ['bark']),
-              ('-ru, ['-IPFV'])]),
-     ('\\f', [(None, ['One dog barks.'])])
+              ('-ru', ['-IPFV'])]),
+     ('\\f', [(None, ['One dog barks.'])]),
      ('\\x', [(None, None)])
     ]
     """
@@ -256,10 +350,13 @@ def _collect_aligned_tokens(src, tgt):
     # make a deque so we can efficiently pop from the front; also this
     # makes a copy of src so we don't affect the original
     src = deque(src)
+    tgt = list(tgt)
+    tgt_len = len(tgt)
     aligned = []
-    for t in tgt:
+    for i, t in enumerate(tgt):
+        last = i + 1 == tgt_len
         grp = [s.group(0).rstrip() for s in src
-               if s.start() >= t.start() and s.start() < t.end()]
+               if s.start() >= t.start() and (s.start() < t.end() or last)]
         # get rid of them for efficiency's sake
         for g in grp:
             src.popleft()
