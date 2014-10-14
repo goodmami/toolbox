@@ -254,7 +254,7 @@ def normalize_record(pairs, aligned_fields, strip=True):
     return list(field_data.items())
 
 
-def align_fields(pairs, alignments=None, tokenizers=None):
+def align_fields(pairs, alignments=None, tokenizers=None, errors='strict'):
     """
     Align source to target tokens for each line in `pairs` using
     alignment mappings given in `alignments`. Line values are tokenized
@@ -273,6 +273,8 @@ def align_fields(pairs, alignments=None, tokenizers=None):
             tokenizer regex is not given for a marker, and the marker is
             the source or target of an alignment, the values will be
             split by whitespace.
+        errors: If 'strict', errors during alignment will be raised.
+            Otherwise they will be ignored.
 
     Returns:
         A list of alignment pairs. Each alignment pair is a structure
@@ -341,25 +343,34 @@ def align_fields(pairs, alignments=None, tokenizers=None):
                         .format(alignments[mkr], mkr)
                     )
                     continue
-                aligned = _collect_aligned_tokens(toks, tgt_toks)
+                aligned = _collect_aligned_tokens(toks, tgt_toks, marker=mkr)
                 aligned_pairs.append((mkr, aligned))
     return aligned_pairs
 
 
-def _collect_aligned_tokens(src, tgt):
+def _collect_aligned_tokens(src, tgt, marker=None, errors='strict'):
     # make a deque so we can efficiently pop from the front; also this
     # makes a copy of src so we don't affect the original
     src = deque(src)
     tgt = list(tgt)
-    tgt_len = len(tgt)
+    last_tgt_idx = len(tgt) - 1
+    last_end = -1  # the end pos of the last source token
     aligned = []
     for i, t in enumerate(tgt):
-        last = i + 1 == tgt_len
-        grp = [s.group(0).rstrip() for s in src
-               if s.start() >= t.start() and (s.start() < t.end() or last)]
-        # get rid of them for efficiency's sake
-        for g in grp:
-            src.popleft()
+        if last_end > t.start():
+            if errors == 'strict':
+                raise ToolboxError(
+                    'Possible misalignment of field {} at position {}.'
+                    .format(marker or '???', t.start()),
+                )
+        remaining = last_tgt_idx - i
+        t_end = t.end()
+        grp = []
+        while src and (remaining == 0 or src[0].start() < (t_end)):
+            s = src.popleft()
+            s_tok = s.group(0).rstrip()
+            last_end = s.start() + len(s_tok)  # .end() doesn't always work
+            grp.append(s_tok)
         aligned.append((t.group(0).rstrip(), grp))
     return aligned
 
