@@ -85,6 +85,9 @@ key for each record.
 
 ```
 
+Note that there were no `\id` markers in the corpus file, so the value
+is `None`.
+
 ### Normalizing tiers
 
 Some toolbox data are line-wrapped, but logically the wrapped lines
