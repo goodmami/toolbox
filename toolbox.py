@@ -4,11 +4,19 @@ from os import listdir
 import re
 from collections import OrderedDict, deque, Sequence
 import logging
+import warnings
 
 default_tokenizer = re.compile(r'\S+\s*')
 
 class ToolboxError(Exception): pass
 class ToolboxInitError(ToolboxError): pass
+class ToolboxAlignmentError(ToolboxError): pass
+class ToolboxWarning(UserWarning): pass
+
+def custom_formatwarning(msg, category, *args):
+    return '{}: {}\n'.format(category.__name__, msg)
+
+warnings.formatwarning = custom_formatwarning
 
 def find_project_file(path):
     proj_path = None
@@ -343,37 +351,66 @@ def align_fields(pairs, alignments=None, tokenizers=None, errors='strict'):
                         .format(alignments[mkr], mkr)
                     )
                     continue
-                aligned = _collect_aligned_tokens(toks, tgt_toks, marker=mkr)
+                aligned = _align_tokens(
+                    toks, tgt_toks, errors=errors
+                )
                 aligned_pairs.append((mkr, aligned))
     return aligned_pairs
 
 
-def _collect_aligned_tokens(src, tgt, marker=None, errors='strict'):
+def _align_tokens(src, tgt, errors='strict'):
     # make a deque so we can efficiently pop from the front; also this
     # makes a copy of src so we don't affect the original
-    src = deque(src)
-    tgt = list(tgt)
-    last_tgt_idx = len(tgt) - 1
+    _src = deque(src)
+    _tgt = deque(tgt)
+    last_tgt_idx = len(_tgt) - 1
     last_end = -1  # the end pos of the last source token
     aligned = []
-    for i, t in enumerate(tgt):
-        if last_end > t.start():
-            if errors == 'strict':
-                raise ToolboxError(
-                    'Possible misalignment of field {} at position {}.'
-                    .format(marker or '???', t.start()),
-                )
-        remaining = last_tgt_idx - i
-        t_end = t.end()
-        grp = []
-        while src and (remaining == 0 or src[0].start() < (t_end)):
-            s = src.popleft()
-            s_tok = s.group(0).rstrip()
-            last_end = s.start() + len(s_tok)  # .end() doesn't always work
-            grp.append(s_tok)
+    while _tgt:
+        t = _tgt.popleft()
+        next_t = _tgt[0] if _tgt else None  # None indicates end of deque
+        try:
+            grp = _collect_aligned_tokens(
+                _src, t, next_t, errors=errors
+            )
+        except ToolboxAlignmentError as e:
+            raise  # possibly handle other errors here; just re-raise for now
         aligned.append((t.group(0).rstrip(), grp))
     return aligned
 
+
+def _collect_aligned_tokens(src, t, next_t, errors='strict'):
+    grp = []
+    while src:
+        s = src[0]  # don't pop just yet
+        s_tok = s.group(0).rstrip()
+
+        if next_t is not None:
+
+            # basic case; reached next column
+            if s.start() >= next_t.start():
+                break
+
+            # exceptional case; overlapping columns
+            s_end = s.start() + len(s_tok)
+            if s_end >= next_t.start():
+                msg = 'Possible misalignment at position {} ({}).'.format(
+                    next_t.start(), s_tok
+                )
+                if errors == 'strict':
+                    raise ToolboxAlignmentError(msg)
+
+                # recover in some way, but still warn the user
+                warnings.warn(msg, ToolboxWarning)
+                if errors == 'ratio':
+                    ratio = float(s_end - next_t.start()) / len(s_tok)
+                    if ratio >= 0.5:
+                        break
+
+        # we're good to go. pop the token and continue
+        src.popleft()  # no need to store it again
+        grp.append(s_tok)
+    return grp
 
 class ToolboxProject(object):
     def __init__(self, path):
