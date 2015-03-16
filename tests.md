@@ -448,6 +448,15 @@ By default, trailing spaces are stripped from each line, but (as in
 Aligning Interlinear Columns with `align_fields()`
 --------------------------------------------------
 
+The `align_fields()` function attempts to interpret the interlinear structure
+that is implicitly encoded in the spacing of the tokens. Not all lines are
+so aligned, so `align_fields()` requires a dictionary mapping the marker of
+one line to the marker of the line it aligns to. For example, often the `\m`
+morphemes line aligns to the `\t` text line, so `'\m': '\t'` would encode
+this alignment. This function returns tuples of (marker, alignments) for each
+line, where marker is the line's marker and alignments is a list of
+(token, aligned_tokens) tuples.
+
 ```python
 >>> pairs = rtf('''
 ... \\t inu=ga   ippiki           hoeru
@@ -470,5 +479,43 @@ Aligning Interlinear Columns with `align_fields()`
          ('-ru', ['-IPFV'])])
 ('\\f', [(None, ['One dog barks.'])])
 ('\\x', [(None, None)])
+
+```
+
+This function also has some capability to recover from inaccurate column
+spacings. There is an optional parameter `errors` that defaults to `strict`
+but can be set to `ratio`. The `strict` setting raises an error when a token
+crosses an observed column boundary, but `ratio` will group the token with
+whichever column it is most covered by. The possible misalignment will still
+raise an warning (instead of an error), but these can be silenced. However,
+it may be useful for the maintainer of a corpus to see the warnings, as it
+can point out possible errors in the corpus. For example:
+
+```python
+>>> import warnings
+>>> warnings.simplefilter('ignore')
+>>> pairs = rtf('''
+... \\t inu=ga   ippiki           hoeru
+... \\m inu    =ga  ichi -hiki       hoe  -ru
+... \\g dog    =NOM one  -CLF.ANIMAL bark -IPFV
+... \\f One dog barks.''')
+>>> algns = tb.align_fields(
+...     pairs,
+...     alignments={'\\m': '\\t', '\\g': '\\m'},
+...     errors='ratio'
+... )
+>>> for algn in algns:
+...     print(algn)  # doctest: +NORMALIZE_WHITESPACE
+('\\t', [('inu=ga   ippiki           hoeru', ['inu=ga', 'ippiki', 'hoeru'])])
+('\\m', [('inu=ga', ['inu', '=ga']),
+         ('ippiki', ['ichi', '-hiki']),
+         ('hoeru', ['hoe', '-ru'])])
+('\\g', [('inu', ['dog']),
+         ('=ga', ['=NOM']),
+         ('ichi', ['one']),
+         ('-hiki', ['-CLF.ANIMAL']),
+         ('hoe', ['bark']),
+         ('-ru', ['-IPFV'])])
+('\\f', [(None, ['One dog barks.'])])
 
 ```
