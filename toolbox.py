@@ -6,6 +6,11 @@ from collections import OrderedDict, deque, Sequence
 import logging
 import warnings
 
+try:
+    from itertools import zip_longest
+except ImportError:
+    from itertools import izip_longest as zip_longest
+
 default_tokenizer = re.compile(r'\S+\s*')
 
 class ToolboxError(Exception): pass
@@ -363,8 +368,8 @@ def _align_tokens(src, tgt, errors='strict'):
     # makes a copy of src so we don't affect the original
     _src = deque(src)
     _tgt = deque(tgt)
-    last_tgt_idx = len(_tgt) - 1
-    last_end = -1  # the end pos of the last source token
+    #last_tgt_idx = len(_tgt) - 1
+    #last_end = -1  # the end pos of the last source token
     aligned = []
     while _tgt:
         t = _tgt.popleft()
@@ -374,7 +379,13 @@ def _align_tokens(src, tgt, errors='strict'):
                 _src, t, next_t, errors=errors
             )
         except ToolboxAlignmentError as e:
-            raise  # possibly handle other errors here; just re-raise for now
+            if errors == 'reanalyze':
+                _src, _tgt = _reanalyze_tokens(src, tgt)
+                aligned = []
+                errors = 'reanalyze_1'  # change this to avoid a cycle
+                continue
+            else:
+                raise
         aligned.append((t.group(0).rstrip(), grp))
     return aligned
 
@@ -397,20 +408,63 @@ def _collect_aligned_tokens(src, t, next_t, errors='strict'):
                 msg = 'Possible misalignment at position {} ({}).'.format(
                     next_t.start(), s_tok
                 )
-                if errors == 'strict':
-                    raise ToolboxAlignmentError(msg)
-
                 # recover in some way, but still warn the user
                 warnings.warn(msg, ToolboxWarning)
                 if errors == 'ratio':
                     ratio = float(s_end - next_t.start()) / len(s_tok)
                     if ratio >= 0.5:
                         break
+                else:  # errors == 'strict' or otherwise
+                    raise ToolboxAlignmentError(msg)
 
         # we're good to go. pop the token and continue
         src.popleft()  # no need to store it again
         grp.append(s_tok)
     return grp
+
+
+def _reanalyze_tokens(src, tgt):
+    # get joined strings
+    src = ' '.join(x.group(0) for x in src)
+    tgt = ' '.join(x.group(0) for x in tgt)
+    # normalize spacing
+    src = re.sub(r'\s+', ' ', src.strip())
+    tgt = re.sub(r'\s+', ' ', tgt.strip())
+    # put them in lists of tokens (initially just the strings)
+    src = [src]
+    tgt = [tgt]
+    # iteratively find deeper alignments if possible
+    level_delims = [  # the order is reversed, so pop() can be used
+        r'([\.])',  # dot-delimiter for glosses
+        r'\s+|((?<!\s)[-=~](?!\s))',  # space or (delim not next to a space)
+        r'(?<=[^-=~\s])\s+(?=[^-=~\s])'  # space not adjacent to a delimiter
+    ]
+    while level_delims:
+        delim = level_delims.pop()
+        assert len(src) == len(tgt)
+        # tokenize each token in src and tgt (and filter '' and None)
+        _src = list(map(lambda x: list(filter(bool, re.split(delim, x))), src))
+        _tgt = list(map(lambda x: list(filter(bool, re.split(delim, x))), tgt))
+        pairs = zip_longest(_src, _tgt, fillvalue=[])
+        if all(len(s) == len(t) for s, t in pairs):
+            # same # tokens on each; reassign and continue
+            src = [tok for toks in _src for tok in toks]
+            tgt = [tok for toks in _tgt for tok in toks]
+        else:
+            # reshape src and break
+            _src = list(map(lambda xs: ' '.join(xs), _src))
+            src, tgt = zip(*map(lambda st: _ljust_pair(*st), zip(_src, tgt)))
+            break
+    # finally return re matches with the default tokenizer
+    src = deque(default_tokenizer.finditer(' '.join(src)))
+    tgt = deque(default_tokenizer.finditer(' '.join(tgt)))
+    return src, tgt
+
+
+def _ljust_pair(s, t):
+    maxlen = max(len(s or ''), len(t or ''))
+    return ((s or '').ljust(maxlen), (t or '').ljust(maxlen))
+
 
 class ToolboxProject(object):
     def __init__(self, path):

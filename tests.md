@@ -484,12 +484,14 @@ line, where marker is the line's marker and alignments is a list of
 
 This function also has some capability to recover from inaccurate column
 spacings. There is an optional parameter `errors` that defaults to `strict`
-but can be set to `ratio`. The `strict` setting raises an error when a token
-crosses an observed column boundary, but `ratio` will group the token with
-whichever column it is most covered by. The possible misalignment will still
-raise an warning (instead of an error), but these can be silenced. However,
-it may be useful for the maintainer of a corpus to see the warnings, as it
-can point out possible errors in the corpus. For example:
+but can be set to `ratio` or `reanalyze`. The `strict` setting raises an error
+when a token crosses an observed column boundary, but `ratio` will group the
+token with whichever column it is most covered by, and `reanalyze` will ignore
+tabular spacing and rely on token delimiters to find groupings. The possible
+misalignment will still raise an warning (instead of an error), but these can
+be silenced. However, it may be useful for the maintainer of a corpus to see
+the warnings, as it can point out possible errors in the corpus. For example,
+here is the `ratio` method:
 
 ```python
 >>> import warnings
@@ -516,6 +518,42 @@ can point out possible errors in the corpus. For example:
          ('-hiki', ['-CLF.ANIMAL']),
          ('hoe', ['bark']),
          ('-ru', ['-IPFV'])])
+('\\f', [(None, ['One dog barks.'])])
+
+```
+
+And here is the `reanalyze` method. Note that morpheme delimiters that group
+with their morpheme are kept attached, but unattached delimiters or those not
+adjacent to a space get separated as tokens (because it is impossible to
+determine which side it attaches to):
+
+```python
+>>> import warnings
+>>> warnings.simplefilter('ignore')
+>>> pairs = rtf('''
+... \\t inu=ga ippiki hoeru
+... \\m inu =ga ichi-hiki hoe - ru
+... \\g dog =NOM one-CLF.ANIMAL bark - IPFV
+... \\f One dog barks.''')
+>>> algns = tb.align_fields(
+...     pairs,
+...     alignments={'\\m': '\\t', '\\g': '\\m'},
+...     errors='reanalyze'
+... )
+>>> for algn in algns:
+...     print(algn)  # doctest: +NORMALIZE_WHITESPACE
+('\\t', [('inu=ga ippiki hoeru', ['inu=ga', 'ippiki', 'hoeru'])])
+('\\m', [('inu=ga', ['inu', '=ga']),
+         ('ippiki', ['ichi', '-', 'hiki']),
+         ('hoeru', ['hoe', '-', 'ru'])])
+('\\g', [('inu', ['dog']),
+         ('=ga', ['=NOM']),
+         ('ichi', ['one']),
+         ('-', ['-']),
+         ('hiki', ['CLF', '.', 'ANIMAL']),
+         ('hoe', ['bark']),
+         ('-', ['-']),
+         ('ru', ['IPFV'])])
 ('\\f', [(None, ['One dog barks.'])])
 
 ```
