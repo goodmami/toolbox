@@ -158,3 +158,9 @@ documentation. To run them as unit tests, do this from the command line:
 ```bash
 python3 -m doctest README.md tests.md
 ```
+
+## Acknowledgments
+
+This project is partially supported by the Affectedness project, under
+the Singapore Ministry of Education Tier 2 grant (grant number
+MOE2013-T2-1-016).
