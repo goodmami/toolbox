@@ -17,16 +17,11 @@ The `toolbox` module is meant to be used as a library, not a script, so
 you'll need to first make sure it's findable by Python. Either
 
 1. copy `toolbox.py` to your project directory
-2. adjust `PYTHONPATH`
+2. install via pip (be careful to use the path and not just `toolbox` or
+   it will install a different package from PyPI)
 
 ```bash
-export PYTHONPATH=/path/to/toolbox:"$PYTHONPATH"
-```
-
-3. or install via pip
-
-```bash
-pip install toolbox/
+pip install ./toolbox/
 ```
 
 You can then load it in Python and use it to read stored Toolbox files.
