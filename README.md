@@ -14,11 +14,19 @@ or more lines of text.
 ## Basic Usage
 
 The `toolbox` module is meant to be used as a library, not a script, so
-you'll need to first make sure it's findable by Python. Either copy
-`toolbox.py` to your project directory, or adjust `PYTHONPATH`:
+you'll need to first make sure it's findable by Python. Either
+
+1. copy `toolbox.py` to your project directory
+2. adjust `PYTHONPATH`
 
 ```bash
 export PYTHONPATH=/path/to/toolbox:"$PYTHONPATH"
+```
+
+3. or install via pip
+
+```bash
+pip install toolbox/
 ```
 
 You can then load it in Python and use it to read stored Toolbox files.
