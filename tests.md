@@ -22,7 +22,7 @@ The `toolbox` module is meant to be used as a library, not a script, so
 your own code would import it as here:
 
 ```python
->>> import toolbox
+>>> from toolbox import toolbox
 
 ```
 
@@ -30,7 +30,7 @@ Since `toolbox` is a common module name, in the event of a collision,
 you can rename it on import as done here:
 
 ```python
->>> import toolbox as tb
+>>> from toolbox import toolbox as tb
 
 ```
 
